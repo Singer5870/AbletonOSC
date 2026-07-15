@@ -29,8 +29,24 @@ class AbletonOSCHandler(Component):
         getattr(target, method)(*params)
 
     def _set_property(self, target, prop, params: Tuple) -> None:
-        self.logger.info("Setting property for %s: %s (new value %s)" % (self.class_identifier, prop, params[0]))
-        setattr(target, prop, params[0])
+        value = params[0]
+        self.logger.info("Setting property for %s: %s (new value %s)" % (self.class_identifier, prop, value))
+        smoother = getattr(self.manager, "parameter_smoother", None)
+        if smoother and smoother.should_smooth_object_property(self.class_identifier, prop):
+            try:
+                numeric = float(value)
+            except (TypeError, ValueError):
+                setattr(target, prop, value)
+                return
+            key = (self.class_identifier, id(target), prop)
+            smoother.set_float(
+                key,
+                numeric,
+                apply_fn=lambda v, t=target, p=prop: setattr(t, p, v),
+                read_fn=lambda t=target, p=prop: float(getattr(t, p)),
+            )
+            return
+        setattr(target, prop, value)
 
     def _get_property(self, target, prop, params: Optional[Tuple] = ()) -> Tuple[Any]:
         try:

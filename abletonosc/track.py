@@ -97,7 +97,13 @@ class TrackHandler(AbletonOSCHandler):
 
         def track_set_send(track, params: Tuple[Any] = ()):
             send_id, value = params
-            track.mixer_device.sends[send_id].value = value
+            send_param = track.mixer_device.sends[send_id]
+            smoother = getattr(self.manager, "parameter_smoother", None)
+            if smoother:
+                key = ("track_send", id(track), int(send_id))
+                smoother.set_live_parameter(key, send_param, float(value))
+                return
+            send_param.value = value
 
         self.osc_server.add_handler("/live/track/get/send", create_track_callback(track_get_send))
         self.osc_server.add_handler("/live/track/set/send", create_track_callback(track_set_send))
@@ -234,6 +240,11 @@ class TrackHandler(AbletonOSCHandler):
     def _set_mixer_property(self, target, prop, params: Tuple) -> None:
         parameter_object = getattr(target.mixer_device, prop)
         self.logger.info("Setting property for %s: %s (new value %s)" % (self.class_identifier, prop, params[0]))
+        smoother = getattr(self.manager, "parameter_smoother", None)
+        if smoother:
+            key = ("track_mixer", id(target), prop)
+            smoother.set_live_parameter(key, parameter_object, float(params[0]))
+            return
         parameter_object.value = params[0]
 
     def _get_mixer_property(self, target, prop, params: Optional[Tuple] = ()) -> Tuple[Any]:

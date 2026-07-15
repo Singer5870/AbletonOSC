@@ -22,6 +22,7 @@ class Manager(ControlSurface):
 
         try:
             self.osc_server = abletonosc.OSCServer()
+            self.parameter_smoother = abletonosc.ParameterSmoother()
             self.schedule_message(0, self.tick)
 
             self.start_logging()
@@ -109,17 +110,23 @@ class Manager(ControlSurface):
 
     def tick(self):
         """
-        Called once per 100ms "tick".
-        Live's embedded Python implementation does not appear to support threading,
-        and beachballs when a thread is started. Instead, this approach allows long-running
-        processes such as the OSC server to perform operations.
+        Process incoming OSC, then advance continuous parameter smoothing.
+        OSC is processed OSC_PROCESS_PASSES times per tick; smoothing applies
+        SMOOTH_STEPS_PER_TICK updates per active parameter (~100 Hz effective).
         """
+        from abletonosc.constants import OSC_PROCESS_PASSES, OSC_TICK_INTERVAL
+
         logger.debug("Tick...")
-        self.osc_server.process()
-        self.schedule_message(1, self.tick)
+        for _ in range(max(1, OSC_PROCESS_PASSES)):
+            self.osc_server.process()
+        if hasattr(self, "parameter_smoother"):
+            self.parameter_smoother.advance()
+        self.schedule_message(OSC_TICK_INTERVAL, self.tick)
 
     def reload_imports(self):
         try:
+            importlib.reload(abletonosc.smoothing)
+            importlib.reload(abletonosc.constants)
             importlib.reload(abletonosc.application)
             importlib.reload(abletonosc.clip)
             importlib.reload(abletonosc.clip_slot)
@@ -136,6 +143,7 @@ class Manager(ControlSurface):
             logging.warning(exc)
 
         self.clear_api()
+        self.parameter_smoother = abletonosc.ParameterSmoother()
         self.init_api()
         logger.info("Reloaded code")
 

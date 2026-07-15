@@ -68,8 +68,14 @@ class DeviceHandler(AbletonOSCHandler):
             return tuple(parameter.is_quantized for parameter in device.parameters)
 
         def device_set_parameters_value(device, params: Tuple[Any] = ()):
+            smoother = getattr(self.manager, "parameter_smoother", None)
             for index, value in enumerate(params):
-                device.parameters[index].value = value
+                parameter = device.parameters[index]
+                if smoother:
+                    key = ("device_param", id(device), index)
+                    smoother.set_live_parameter(key, parameter, float(value))
+                else:
+                    parameter.value = value
 
         self.osc_server.add_handler("/live/device/get/num_parameters", create_device_callback(device_get_num_parameters))
         self.osc_server.add_handler("/live/device/get/parameters/name", create_device_callback(device_get_parameters_name))
@@ -128,7 +134,13 @@ class DeviceHandler(AbletonOSCHandler):
         def device_set_parameter_value(device, params: Tuple[Any] = ()):
             param_index, param_value = params[:2]
             param_index = int(param_index)
-            device.parameters[param_index].value = param_value
+            parameter = device.parameters[param_index]
+            smoother = getattr(self.manager, "parameter_smoother", None)
+            if smoother:
+                key = ("device_param", id(device), param_index)
+                smoother.set_live_parameter(key, parameter, float(param_value))
+                return
+            parameter.value = param_value
 
         def device_get_parameter_name(device, params: Tuple[Any] = ()):
             param_index = int(params[0])
