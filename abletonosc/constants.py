@@ -10,10 +10,10 @@ OSC_RESPONSE_PORT = 11001
 OSC_TICK_INTERVAL = 1
 
 # How many times osc_server.process() runs each tick (drains UDP queue).
-OSC_PROCESS_PASSES = 1
+OSC_PROCESS_PASSES = 3
 
-# Smoothing applies to device/clip parameters — not mixer faders (encoder-driven).
-SMOOTHING_ENABLED = True
+# Smoothing off by default — mixer faders are immediate; enable per-device if needed.
+SMOOTHING_ENABLED = False
 SMOOTH_STEPS_PER_TICK = 1
 SMOOTH_STEP_FACTOR = 0.45
 SMOOTH_EPSILON = 1e-6
