@@ -111,10 +111,9 @@ class Manager(ControlSurface):
     def tick(self):
         """
         Process incoming OSC, then advance continuous parameter smoothing.
-        OSC is processed OSC_PROCESS_PASSES times per tick; smoothing applies
-        SMOOTH_STEPS_PER_TICK updates per active parameter (~100 Hz effective).
         """
-        from abletonosc.constants import OSC_PROCESS_PASSES, OSC_TICK_INTERVAL
+        OSC_PROCESS_PASSES = abletonosc.constants.OSC_PROCESS_PASSES
+        OSC_TICK_INTERVAL = abletonosc.constants.OSC_TICK_INTERVAL
 
         logger.debug("Tick...")
         for _ in range(max(1, OSC_PROCESS_PASSES)):
