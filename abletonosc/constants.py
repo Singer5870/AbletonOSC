@@ -10,12 +10,12 @@ OSC_RESPONSE_PORT = 11001
 OSC_TICK_INTERVAL = 1
 
 # How many times osc_server.process() runs each tick (drains UDP queue).
-OSC_PROCESS_PASSES = 2
+OSC_PROCESS_PASSES = 1
 
-# Continuous parameter updates applied per tick (1 tick ≈ 100ms → 10 ≈ 100 Hz).
+# One Live parameter step per tick (~10 Hz). Avoids listener/OSC floods.
 SMOOTHING_ENABLED = True
-SMOOTH_STEPS_PER_TICK = 10
-SMOOTH_STEP_FACTOR = 0.42  # fraction of remaining delta applied each substep
+SMOOTH_STEPS_PER_TICK = 1
+SMOOTH_STEP_FACTOR = 0.45
 SMOOTH_EPSILON = 1e-6
 
 # Object properties that are always applied immediately (toggles, enums, strings, triggers).
