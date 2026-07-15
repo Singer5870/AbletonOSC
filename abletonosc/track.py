@@ -255,6 +255,9 @@ class TrackHandler(AbletonOSCHandler):
     def _start_mixer_listen(self, target, prop, params: Optional[Tuple] = ()) -> None:
         parameter_object = getattr(target.mixer_device, prop)
         def property_changed_callback():
+            smoother = getattr(self.manager, "parameter_smoother", None)
+            if smoother and smoother.is_suppressing_notifications():
+                return
             value = parameter_object.value
             self.logger.info("Property %s changed of %s %s: %s" % (prop, self.class_identifier, str(params), value))
             osc_address = "/live/%s/get/%s" % (self.class_identifier, prop)

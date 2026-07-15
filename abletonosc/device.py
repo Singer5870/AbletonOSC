@@ -103,6 +103,9 @@ class DeviceHandler(AbletonOSCHandler):
         def device_get_parameter_value_listener(device, params: Tuple[Any] = ()):
 
             def property_changed_callback():
+                smoother = getattr(self.manager, "parameter_smoother", None)
+                if smoother and smoother.is_suppressing_notifications():
+                    return
                 value = device.parameters[params[2]].value
                 self.logger.info("Property %s changed of %s %s: %s" % ('value', 'device parameter', str(params), value))
                 self.osc_server.send("/live/device/get/parameter/value", (*params, value,))

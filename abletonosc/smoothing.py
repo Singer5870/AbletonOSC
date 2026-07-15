@@ -56,6 +56,18 @@ class ParameterSmoother:
         self.step_factor = step_factor
         self.epsilon = epsilon
         self._channels: Dict[Key, _SmoothChannel] = {}
+        self._suppress_depth = 0
+
+    def is_suppressing_notifications(self) -> bool:
+        """True while applying intermediate smooth steps (listeners must not echo OSC)."""
+        return self._suppress_depth > 0
+
+    def _apply_quiet(self, apply_fn: Callable[[float], None], value: float) -> None:
+        self._suppress_depth += 1
+        try:
+            apply_fn(value)
+        finally:
+            self._suppress_depth -= 1
 
     @staticmethod
     def should_smooth_object_property(class_identifier: str, prop: str) -> bool:
@@ -101,7 +113,8 @@ class ParameterSmoother:
             apply_fn(target)
             return
 
-        self._channels[key] = _SmoothChannel(target, apply_fn, read_fn)
+        quiet_apply = lambda v, fn=apply_fn: self._apply_quiet(fn, v)
+        self._channels[key] = _SmoothChannel(target, quiet_apply, read_fn)
 
     def set_live_parameter(
         self,

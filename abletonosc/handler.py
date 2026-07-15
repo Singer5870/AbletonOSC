@@ -75,6 +75,9 @@ class AbletonOSCHandler(Component):
             getter:
         """
         def property_changed_callback():
+            smoother = getattr(self.manager, "parameter_smoother", None)
+            if smoother and smoother.is_suppressing_notifications():
+                return
             if getter is None:
                 value = getattr(target, prop)
             else:
