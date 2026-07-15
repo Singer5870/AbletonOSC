@@ -12,7 +12,7 @@ OSC_TICK_INTERVAL = 1
 # How many times osc_server.process() runs each tick (drains UDP queue).
 OSC_PROCESS_PASSES = 1
 
-# One Live parameter step per tick (~10 Hz). Intermediate steps do not echo OSC.
+# Smoothing applies to device/clip parameters — not mixer faders (encoder-driven).
 SMOOTHING_ENABLED = True
 SMOOTH_STEPS_PER_TICK = 1
 SMOOTH_STEP_FACTOR = 0.45
