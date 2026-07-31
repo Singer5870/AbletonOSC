@@ -84,9 +84,17 @@ class AbletonOSCHandler(Component):
                 value = getter(params)
             if type(value) is not tuple:
                 value = (value,)
-            self.logger.info("Property %s changed of %s %s: %s" % (prop, self.class_identifier, str(params), value))
+            send_params = params
+            # Track objects move on reorder — always report the current index.
+            if self.class_identifier == "track":
+                try:
+                    track_index = list(self.song.tracks).index(target)
+                    send_params = (track_index,) + tuple(params[1:]) if params else (track_index,)
+                except (ValueError, AttributeError):
+                    return
+            self.logger.info("Property %s changed of %s %s: %s" % (prop, self.class_identifier, str(send_params), value))
             osc_address = "/live/%s/get/%s" % (self.class_identifier, prop)
-            self.osc_server.send(osc_address, (*params, *value,))
+            self.osc_server.send(osc_address, (*send_params, *value,))
 
         listener_key = (prop, tuple(params))
         if listener_key in self.listener_functions:

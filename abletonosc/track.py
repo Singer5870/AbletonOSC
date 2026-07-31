@@ -286,46 +286,78 @@ class TrackHandler(AbletonOSCHandler):
 
     def _start_mixer_listen(self, target, prop, params: Optional[Tuple] = ()) -> None:
         parameter_object = getattr(target.mixer_device, prop)
+        # Capture the Track object — resolve its *current* index on each callback so
+        # reorder/add/delete does not paint the wrong SetControl slot.
+        track = target
+
         def property_changed_callback():
             smoother = getattr(self.manager, "parameter_smoother", None)
             if smoother and smoother.is_suppressing_notifications():
                 return
+            try:
+                track_index = list(self.song.tracks).index(track)
+            except ValueError:
+                # Track was deleted / no longer in the set
+                return
             value = parameter_object.value
-            self.logger.info("Property %s changed of %s %s: %s" % (prop, self.class_identifier, str(params), value))
+            self.logger.info(
+                "Property %s changed of %s (%d,): %s"
+                % (prop, self.class_identifier, track_index, value)
+            )
             osc_address = "/live/%s/get/%s" % (self.class_identifier, prop)
-            self.osc_server.send(osc_address, (*params, value,))
+            self.osc_server.send(osc_address, (track_index, value,))
 
-        listener_key = (prop, tuple(params))
+        # Key listeners by parameter identity so stop/restart survives reorder.
+        listener_key = (prop, ("mixer", id(parameter_object)))
+        # Also accept legacy key (prop, (track_index,)) during transition
+        legacy_key = (prop, tuple(params)) if params else None
         if listener_key in self.listener_functions:
-            self._stop_mixer_listen(target, prop, params)
+            self._stop_mixer_listen_key(listener_key)
+        if legacy_key and legacy_key in self.listener_functions:
+            self._stop_mixer_listen_key(legacy_key)
 
-        self.logger.info("Adding listener for %s %s, property: %s" % (self.class_identifier, str(params), prop))
+        self.logger.info(
+            "Adding listener for %s mixer %s (track id=%s)"
+            % (self.class_identifier, prop, id(track))
+        )
 
         parameter_object.add_value_listener(property_changed_callback)
         self.listener_functions[listener_key] = property_changed_callback
-        # Store parameter so reload/clear_api can remove the listener safely.
         self.listener_objects[listener_key] = parameter_object
-        #--------------------------------------------------------------------------------
-        # Immediately send the current value
-        #--------------------------------------------------------------------------------
         property_changed_callback()
+
+    def _stop_mixer_listen_key(self, listener_key) -> None:
+        if listener_key not in self.listener_functions:
+            return
+        listener_function = self.listener_functions[listener_key]
+        stored = self.listener_objects.get(listener_key)
+        try:
+            if stored is not None:
+                stored.remove_value_listener(listener_function)
+        except Exception as e:
+            self.logger.info("Exception whilst removing mixer listener (likely benign): %s" % e)
+        del self.listener_functions[listener_key]
+        self.listener_objects.pop(listener_key, None)
 
     def _stop_mixer_listen(self, target, prop, params: Optional[Tuple[Any]] = ()) -> None:
         parameter_object = getattr(target.mixer_device, prop)
-        listener_key = (prop, tuple(params))
+        listener_key = (prop, ("mixer", id(parameter_object)))
+        legacy_key = (prop, tuple(params)) if params else None
+        removed = False
         if listener_key in self.listener_functions:
-            self.logger.info("Removing listener for %s %s, property %s" % (self.class_identifier, str(params), prop))
-            listener_function = self.listener_functions[listener_key]
-            try:
-                # Prefer stored parameter object if present
-                stored = self.listener_objects.get(listener_key, parameter_object)
-                stored.remove_value_listener(listener_function)
-            except Exception as e:
-                self.logger.info("Exception whilst removing mixer listener (likely benign): %s" % e)
-            del self.listener_functions[listener_key]
-            self.listener_objects.pop(listener_key, None)
-        else:
-            self.logger.warning("No listener function found for property: %s (%s)" % (prop, str(params)))
+            self.logger.info("Removing listener for %s mixer %s" % (self.class_identifier, prop))
+            self._stop_mixer_listen_key(listener_key)
+            removed = True
+        if legacy_key and legacy_key in self.listener_functions:
+            self._stop_mixer_listen_key(legacy_key)
+            removed = True
+        if removed:
+            return
+        for key, obj in list(self.listener_objects.items()):
+            if key[0] == prop and obj == parameter_object:
+                self._stop_mixer_listen_key(key)
+                return
+        self.logger.warning("No listener function found for property: %s (%s)" % (prop, str(params)))
 
     def clear_api(self):
         """Clear track + mixer listeners without assuming listener_objects is complete."""
@@ -333,9 +365,7 @@ class TrackHandler(AbletonOSCHandler):
             prop, params = listener_key
             try:
                 if prop in ("volume", "panning"):
-                    track_index = int(params[0])
-                    track = self.song.tracks[track_index]
-                    self._stop_mixer_listen(track, prop, params)
+                    self._stop_mixer_listen_key(listener_key)
                 else:
                     target = self.listener_objects.get(listener_key)
                     if target is not None:
