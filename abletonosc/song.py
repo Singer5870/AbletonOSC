@@ -283,6 +283,31 @@ class SongHandler(AbletonOSCHandler):
         self.osc_server.add_handler("/live/song/start_listen/beat", start_beat_listener)
         self.osc_server.add_handler("/live/song/stop_listen/beat", stop_beat_listener)
 
+        #--------------------------------------------------------------------------------
+        # Track list changes (add / delete / reorder) — SetControl remaps MidiMap on this
+        #--------------------------------------------------------------------------------
+        def tracks_changed():
+            count = len(self.song.tracks)
+            names = tuple(track.name for track in self.song.tracks)
+            self.osc_server.send("/live/song/tracks", (count,) + names)
+            self.logger.info("Song tracks changed: %d" % count)
+
+        def stop_tracks_listener(params: Tuple[Any] = ()):
+            try:
+                self.song.remove_tracks_listener(self._tracks_changed)
+            except Exception:
+                pass
+
+        def start_tracks_listener(params: Tuple[Any] = ()):
+            stop_tracks_listener()
+            self._tracks_changed = tracks_changed
+            self.song.add_tracks_listener(self._tracks_changed)
+            tracks_changed()
+
+        self._tracks_changed = tracks_changed
+        self.osc_server.add_handler("/live/song/start_listen/tracks", start_tracks_listener)
+        self.osc_server.add_handler("/live/song/stop_listen/tracks", stop_tracks_listener)
+
     def current_song_time_changed(self):
         #--------------------------------------------------------------------------------
         # If song has rewound or skipped to next beat, sent a /live/beat message
@@ -296,5 +321,10 @@ class SongHandler(AbletonOSCHandler):
         super().clear_api()
         try:
             self.song.remove_current_song_time_listener(self.current_song_time_changed)
+        except Exception:
+            pass
+        try:
+            if hasattr(self, "_tracks_changed"):
+                self.song.remove_tracks_listener(self._tracks_changed)
         except:
             pass

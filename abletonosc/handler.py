@@ -130,6 +130,15 @@ class AbletonOSCHandler(Component):
         Clears all listener functions, to prevent listeners continuing to report after a reload.
         """
         for listener_key in list(self.listener_functions.keys())[:]:
-            target = self.listener_objects[listener_key]
             prop, params = listener_key
-            self._stop_listen(target, prop, params)
+            target = self.listener_objects.get(listener_key)
+            if target is None:
+                # Mixer listeners may only live in listener_functions — drop safely.
+                self.listener_functions.pop(listener_key, None)
+                continue
+            try:
+                self._stop_listen(target, prop, params)
+            except Exception as e:
+                self.logger.info("Exception whilst clearing listener (likely benign): %s" % e)
+                self.listener_functions.pop(listener_key, None)
+                self.listener_objects.pop(listener_key, None)

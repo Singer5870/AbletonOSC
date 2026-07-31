@@ -89,6 +89,17 @@ class TrackHandler(AbletonOSCHandler):
             self.osc_server.add_handler("/live/track/stop_listen/%s" % prop,
                                         create_track_callback(self._stop_mixer_listen, prop, include_track_id=True))
 
+        # Legacy OSC smooth paths — prefer MidiMap for continuous params.
+        # Kept registered so old clients don't break, but SetControl does not use them.
+        self.osc_server.add_handler(
+            "/live/track/set/volume_smooth",
+            create_track_callback(self._set_mixer_property_smooth, "volume"),
+        )
+        self.osc_server.add_handler(
+            "/live/track/set/panning_smooth",
+            create_track_callback(self._set_mixer_property_smooth, "panning"),
+        )
+
         # Still need to fix these
         # Might want to find a better approach that unifies volume and sends
         def track_get_send(track, params: Tuple[Any] = ()):
@@ -233,12 +244,40 @@ class TrackHandler(AbletonOSCHandler):
         self.osc_server.add_handler("/live/track/set/input_routing_channel", create_track_callback(track_set_input_routing_channel))
 
     def _set_mixer_property(self, target, prop, params: Tuple) -> None:
-        # Mixer faders: apply immediately — smoothing lags behind fast encoder streams.
+        # Stock address: immediate apply (recalls, hard jumps, third-party clients).
         parameter_object = getattr(target.mixer_device, prop)
         self.logger.debug(
             "Setting property for %s: %s (new value %s)" % (self.class_identifier, prop, params[0])
         )
-        parameter_object.value = float(params[0])
+        smoother = getattr(self.manager, "parameter_smoother", None)
+        if smoother:
+            # immediate=True also cancels any in-flight smooth ramp on this parameter.
+            smoother.set_live_parameter(
+                ("mixer", prop, id(parameter_object)),
+                parameter_object,
+                float(params[0]),
+                immediate=True,
+            )
+        else:
+            parameter_object.value = float(params[0])
+
+    def _set_mixer_property_smooth(self, target, prop, params: Tuple) -> None:
+        # Sparse gesture targets — ParameterSmoother ramps inside Live between OSC ticks.
+        parameter_object = getattr(target.mixer_device, prop)
+        value = float(params[0])
+        self.logger.debug(
+            "Smoothing property for %s: %s (target %s)" % (self.class_identifier, prop, value)
+        )
+        smoother = getattr(self.manager, "parameter_smoother", None)
+        if smoother:
+            smoother.set_live_parameter(
+                ("mixer", prop, id(parameter_object)),
+                parameter_object,
+                value,
+                immediate=False,
+            )
+        else:
+            parameter_object.value = value
 
     def _get_mixer_property(self, target, prop, params: Optional[Tuple] = ()) -> Tuple[Any]:
         parameter_object = getattr(target.mixer_device, prop)
@@ -264,6 +303,8 @@ class TrackHandler(AbletonOSCHandler):
 
         parameter_object.add_value_listener(property_changed_callback)
         self.listener_functions[listener_key] = property_changed_callback
+        # Store parameter so reload/clear_api can remove the listener safely.
+        self.listener_objects[listener_key] = parameter_object
         #--------------------------------------------------------------------------------
         # Immediately send the current value
         #--------------------------------------------------------------------------------
@@ -275,7 +316,33 @@ class TrackHandler(AbletonOSCHandler):
         if listener_key in self.listener_functions:
             self.logger.info("Removing listener for %s %s, property %s" % (self.class_identifier, str(params), prop))
             listener_function = self.listener_functions[listener_key]
-            parameter_object.remove_value_listener(listener_function)
+            try:
+                # Prefer stored parameter object if present
+                stored = self.listener_objects.get(listener_key, parameter_object)
+                stored.remove_value_listener(listener_function)
+            except Exception as e:
+                self.logger.info("Exception whilst removing mixer listener (likely benign): %s" % e)
             del self.listener_functions[listener_key]
+            self.listener_objects.pop(listener_key, None)
         else:
             self.logger.warning("No listener function found for property: %s (%s)" % (prop, str(params)))
+
+    def clear_api(self):
+        """Clear track + mixer listeners without assuming listener_objects is complete."""
+        for listener_key in list(self.listener_functions.keys())[:]:
+            prop, params = listener_key
+            try:
+                if prop in ("volume", "panning"):
+                    track_index = int(params[0])
+                    track = self.song.tracks[track_index]
+                    self._stop_mixer_listen(track, prop, params)
+                else:
+                    target = self.listener_objects.get(listener_key)
+                    if target is not None:
+                        self._stop_listen(target, prop, params)
+                    else:
+                        self.listener_functions.pop(listener_key, None)
+            except Exception as e:
+                self.logger.info("Exception whilst clearing track listener (likely benign): %s" % e)
+                self.listener_functions.pop(listener_key, None)
+                self.listener_objects.pop(listener_key, None)

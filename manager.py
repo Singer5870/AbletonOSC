@@ -19,6 +19,8 @@ class Manager(ControlSurface):
 
         self.handlers = []
         self.midi_mappings = {}
+        # Discrete mute/solo/arm — applied in receive_midi (not Live.MidiMap)
+        self.midi_button_mappings = {}
 
         try:
             self.osc_server = abletonosc.OSCServer()
@@ -30,6 +32,10 @@ class Manager(ControlSurface):
 
             self.show_message("AbletonOSC: Listening for OSC on port %d" % abletonosc.OSC_LISTEN_PORT)
             logger.info("Started AbletonOSC on address %s" % str(self.osc_server._local_addr))
+            logger.info(
+                "Control path: continuous params use Live.MidiMap (MIDI CCs); "
+                "OSC is for rebind/state only — do not use /set/volume for faders"
+            )
         except OSError as msg:
             self.show_message("AbletonOSC: Couldn't bind to port %d (%s)" % (abletonosc.OSC_LISTEN_PORT, msg))
             logger.info("Couldn't bind to port %d (%s)" % (abletonosc.OSC_LISTEN_PORT, msg))
@@ -131,6 +137,7 @@ class Manager(ControlSurface):
             importlib.reload(abletonosc.clip_slot)
             importlib.reload(abletonosc.device)
             importlib.reload(abletonosc.handler)
+            importlib.reload(abletonosc.midimap)
             importlib.reload(abletonosc.osc_server)
             importlib.reload(abletonosc.scene)
             importlib.reload(abletonosc.song)
@@ -141,10 +148,32 @@ class Manager(ControlSurface):
             exc = traceback.format_exc()
             logging.warning(exc)
 
-        self.clear_api()
-        self.parameter_smoother = abletonosc.ParameterSmoother()
-        self.init_api()
-        logger.info("Reloaded code")
+        # Always re-init API even if clear fails — never leave an empty handler table.
+        try:
+            self.clear_api()
+        except Exception:
+            logging.warning("clear_api during reload failed:\n%s" % traceback.format_exc())
+            try:
+                self.osc_server.clear_handlers()
+            except Exception:
+                pass
+            self.handlers = []
+
+        try:
+            self.parameter_smoother = abletonosc.ParameterSmoother()
+            if not hasattr(self, "midi_mappings") or self.midi_mappings is None:
+                self.midi_mappings = {}
+            if not hasattr(self, "midi_button_mappings") or self.midi_button_mappings is None:
+                self.midi_button_mappings = {}
+            self.midi_mappings.clear()
+            self.midi_button_mappings.clear()
+            self.init_api()
+            self.request_rebuild_midi_map()
+            logger.info("Reloaded code")
+            self.show_message("AbletonOSC: Reloaded")
+        except Exception:
+            logging.error("init_api during reload failed:\n%s" % traceback.format_exc())
+            self.show_message("AbletonOSC: Reload failed — reselect Control Surface")
 
     def disconnect(self):
         self.show_message("Disconnecting...")
@@ -153,13 +182,67 @@ class Manager(ControlSurface):
         self.osc_server.shutdown()
         super().disconnect()
 
+    def receive_midi(self, midi_bytes):
+        """
+        Handle discrete button CCs (mute/solo/arm). Continuous CCs are claimed by
+        Live.MidiMap and do not arrive here.
+        """
+        if midi_bytes and len(midi_bytes) >= 3:
+            status = midi_bytes[0] & 0xF0
+            channel = midi_bytes[0] & 0x0F
+            if status == 0xB0:  # control change
+                cc = int(midi_bytes[1])
+                value = int(midi_bytes[2])
+                binding = self.midi_button_mappings.get((channel, cc))
+                if binding is not None:
+                    action, track_index = binding
+                    try:
+                        track = self.song.tracks[int(track_index)]
+                        on = value >= 64
+                        if action == "mute":
+                            track.mute = on
+                        elif action == "solo":
+                            track.solo = on
+                        elif action == "arm":
+                            if track.can_be_armed:
+                                track.arm = on
+                    except Exception:
+                        logger.warning(
+                            "MIDI button ch=%d cc=%d failed:\n%s"
+                            % (channel, cc, traceback.format_exc())
+                        )
+                    return
+        super().receive_midi(midi_bytes)
+
     def build_midi_map(self, midi_map_handle):
         """
         Called by Live to build the MIDI map.
-        """
-        logger.debug("Building MIDI map...")
 
-        for channel, cc in self.midi_mappings.keys():
-            parameter = self.midi_mappings[(channel, cc)]
-            Live.MidiMap.map_midi_cc(midi_map_handle, parameter, channel, cc, Live.MidiMap.MapMode.absolute, 1)
-            logger.debug("Mapped CC %d on channel %d to parameter %s" % (cc, channel, parameter.name))
+        Direct MidiMap bindings update parameters in Live's C++ core (same path as
+        Launch Control scripts) — not on the AbletonOSC OSC tick.
+        """
+        logger.info(
+            "Building MIDI map (%d continuous, %d buttons)..."
+            % (len(self.midi_mappings), len(self.midi_button_mappings))
+        )
+
+        for channel, cc in list(self.midi_mappings.keys()):
+            parameter = self.midi_mappings.get((channel, cc))
+            if parameter is None:
+                continue
+            try:
+                Live.MidiMap.map_midi_cc(
+                    midi_map_handle,
+                    parameter,
+                    channel,
+                    cc,
+                    Live.MidiMap.MapMode.absolute,
+                    True,  # avoid_takeover — SetControl is authoritative while moving
+                )
+                logger.debug(
+                    "Mapped CC %d on channel %d to parameter %s" % (cc, channel, parameter.name)
+                )
+            except Exception:
+                logger.warning(
+                    "Failed to map CC %d ch %d: %s" % (cc, channel, traceback.format_exc())
+                )

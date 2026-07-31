@@ -12,10 +12,11 @@ OSC_TICK_INTERVAL = 1
 # How many times osc_server.process() runs each tick (drains UDP queue).
 OSC_PROCESS_PASSES = 3
 
-# Smoothing off by default — mixer faders are immediate; enable per-device if needed.
-SMOOTHING_ENABLED = False
-SMOOTH_STEPS_PER_TICK = 1
-SMOOTH_STEP_FACTOR = 0.45
+# Target+ramp for /live/track/set/volume_smooth (stock /set/volume stays immediate).
+# Clients should coalesce targets (~20–30 Hz); do not spam every encoder tick.
+SMOOTHING_ENABLED = True
+SMOOTH_STEPS_PER_TICK = 4
+SMOOTH_STEP_FACTOR = 0.4
 SMOOTH_EPSILON = 1e-6
 
 # Object properties that are always applied immediately (toggles, enums, strings, triggers).
