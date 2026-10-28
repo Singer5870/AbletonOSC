@@ -130,6 +130,15 @@ class TrackHandler(AbletonOSCHandler):
         def track_get_clip_names(track, _):
             return tuple(clip_slot.clip.name if clip_slot.clip else None for clip_slot in track.clip_slots)
 
+        def track_get_clip_file_paths(track, _):
+            # Audio clips only; MIDI clips and empty slots give None (SetControl overlay matches favourites by file).
+            def file_path(clip_slot):
+                try:
+                    return clip_slot.clip.file_path if clip_slot.clip else None
+                except Exception:
+                    return None
+            return tuple(file_path(clip_slot) for clip_slot in track.clip_slots)
+
         def track_get_clip_lengths(track, _):
             return tuple(clip_slot.clip.length if clip_slot.clip else None for clip_slot in track.clip_slots)
 
@@ -149,6 +158,7 @@ class TrackHandler(AbletonOSCHandler):
         Returns a list of clip properties, or Nil if clip is empty
         """
         self.osc_server.add_handler("/live/track/get/clips/name", create_track_callback(track_get_clip_names))
+        self.osc_server.add_handler("/live/track/get/clips/file_path", create_track_callback(track_get_clip_file_paths))
         self.osc_server.add_handler("/live/track/get/clips/length", create_track_callback(track_get_clip_lengths))
         self.osc_server.add_handler("/live/track/get/clips/color", create_track_callback(track_get_clip_colors))
         self.osc_server.add_handler("/live/track/get/arrangement_clips/name", create_track_callback(track_get_arrangement_clip_names))
