@@ -118,6 +118,11 @@ class DeviceHandler(AbletonOSCHandler):
             param_index = int(params[0])
             return param_index, device.parameters[param_index].str_for_value(device.parameters[param_index].value)
         
+        # SetControl: the display text for any values of a parameter (e.g. a crossover's Hz curve), without changing it.
+        def device_get_parameter_value_string_for(device, params: Tuple[Any] = ()):
+            param = device.parameters[int(params[0])]
+            return (int(params[0]), *[param.str_for_value(float(v)) for v in params[1:]])
+
         def device_get_parameter_value_listener(device, params: Tuple[Any] = ()):
 
             def property_changed_callback():
@@ -163,6 +168,7 @@ class DeviceHandler(AbletonOSCHandler):
 
         self.osc_server.add_handler("/live/device/get/parameter/value", create_device_callback(device_get_parameter_value))
         self.osc_server.add_handler("/live/device/get/parameter/value_string", create_device_callback(device_get_parameter_value_string))
+        self.osc_server.add_handler("/live/device/get/parameter/value_string_for", create_device_callback(device_get_parameter_value_string_for))
         self.osc_server.add_handler("/live/device/set/parameter/value", create_device_callback(device_set_parameter_value))
         self.osc_server.add_handler("/live/device/get/parameter/name", create_device_callback(device_get_parameter_name))
         self.osc_server.add_handler("/live/device/start_listen/parameter/value", create_device_callback(device_get_parameter_value_listener, include_ids = True))
