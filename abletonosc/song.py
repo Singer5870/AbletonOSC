@@ -110,6 +110,17 @@ class SongHandler(AbletonOSCHandler):
             return tuple(self.song.tracks[index].name for index in range(track_index_min, track_index_max))
         self.osc_server.add_handler("/live/song/get/track_names", song_get_track_names)
 
+        # Per-set data, saved inside the Live set (Live 11+): SetControl keeps the favourite clips here.
+        def song_get_data(params):
+            return (params[0], str(self.song.get_data(params[0], "")))
+
+        def song_set_data(params):
+            self.song.set_data(params[0], params[1])
+            return (params[0], params[1])
+
+        self.osc_server.add_handler("/live/song/get/data", song_get_data)
+        self.osc_server.add_handler("/live/song/set/data", song_set_data)
+
         def song_get_return_track_names(params):
             if len(params) == 0:
                 track_index_min, track_index_max = 0, len(self.song.return_tracks)
