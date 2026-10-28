@@ -11,6 +11,9 @@ import logging.handlers
 import os
 
 logger = logging.getLogger("abletonosc")
+# SetControl: CC that wakes the script to read OSC immediately (channel 16, CC 119).
+WAKE_CHANNEL = 15
+WAKE_CC = 119
 
 class Manager(ControlSurface):
     def __init__(self, c_instance):
@@ -56,6 +59,8 @@ class Manager(ControlSurface):
         log_path = os.path.join(log_dir, "abletonosc.log")
         self.log_file_handler = logging.handlers.RotatingFileHandler(log_path, maxBytes=5 * 1024 * 1024, backupCount=2)
         self.log_file_handler.setLevel(self.log_level.upper())
+        # The level on the logger too: otherwise every INFO line also lands in Live's own Log.txt.
+        logger.setLevel(self.log_level.upper())
         formatter = logging.Formatter('(%(asctime)s) [%(levelname)s] %(message)s')
         self.log_file_handler.setFormatter(formatter)
         logger.addHandler(self.log_file_handler)
@@ -90,6 +95,7 @@ class Manager(ControlSurface):
             assert log_level in ("debug", "info", "warning", "error", "critical")
             self.log_level = log_level
             self.log_file_handler.setLevel(self.log_level.upper())
+            logger.setLevel(self.log_level.upper())
         def show_message_callback(params):
             self.show_message(params[0])
 
@@ -189,7 +195,15 @@ class Manager(ControlSurface):
         """
         Handle discrete button CCs (mute/solo/arm). Continuous CCs are claimed by
         Live.MidiMap and do not arrive here.
+        SetControl wake: the bridge sends WAKE_CC after each OSC packet, so OSC is read
+        at once instead of on the next ~100 ms tick.
         """
+        if tuple(midi_bytes[:2]) == (0xB0 | WAKE_CHANNEL, WAKE_CC):
+            try:
+                self.osc_server.process()
+            except Exception:
+                logger.warning("OSC process on wake failed:\n%s" % traceback.format_exc())
+            return
         if midi_bytes and len(midi_bytes) >= 3:
             status = midi_bytes[0] & 0xF0
             channel = midi_bytes[0] & 0x0F
@@ -228,6 +242,13 @@ class Manager(ControlSurface):
             "Building MIDI map (%d continuous, %d buttons)..."
             % (len(self.midi_mappings), len(self.midi_button_mappings))
         )
+
+        # Forward the wake CC and the button CCs to receive_midi (unforwarded MIDI never reaches the script).
+        for channel, cc in [(WAKE_CHANNEL, WAKE_CC)] + list(self.midi_button_mappings.keys()):
+            try:
+                Live.MidiMap.forward_midi_cc(self._c_instance.handle(), midi_map_handle, channel, cc)
+            except Exception:
+                logger.warning("Failed to forward CC %d ch %d: %s" % (cc, channel, traceback.format_exc()))
 
         for channel, cc in list(self.midi_mappings.keys()):
             parameter = self.midi_mappings.get((channel, cc))
