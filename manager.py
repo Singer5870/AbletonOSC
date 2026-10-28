@@ -7,6 +7,7 @@ from . import abletonosc
 import importlib
 import traceback
 import logging
+import logging.handlers
 import os
 
 logger = logging.getLogger("abletonosc")
@@ -15,7 +16,9 @@ class Manager(ControlSurface):
     def __init__(self, c_instance):
         ControlSurface.__init__(self, c_instance)
 
-        self.log_level = "info"
+        # SetControl: "warning" by default; every listener change at "info" filled
+        # the log to 4.4 GB. Raise it with /live/api/set/log_level while debugging.
+        self.log_level = "warning"
 
         self.handlers = []
         self.midi_mappings = {}
@@ -51,7 +54,7 @@ class Manager(ControlSurface):
         if not os.path.exists(log_dir):
             os.mkdir(log_dir, 0o755)
         log_path = os.path.join(log_dir, "abletonosc.log")
-        self.log_file_handler = logging.FileHandler(log_path)
+        self.log_file_handler = logging.handlers.RotatingFileHandler(log_path, maxBytes=5 * 1024 * 1024, backupCount=2)
         self.log_file_handler.setLevel(self.log_level.upper())
         formatter = logging.Formatter('(%(asctime)s) [%(levelname)s] %(message)s')
         self.log_file_handler.setFormatter(formatter)
