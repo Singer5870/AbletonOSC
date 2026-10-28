@@ -12,9 +12,9 @@ OSC_TICK_INTERVAL = 1
 # How many times osc_server.process() runs each tick (drains UDP queue).
 OSC_PROCESS_PASSES = 3
 
-# Target+ramp for /live/track/set/volume_smooth (stock /set/volume stays immediate).
+# Off (David, 2026-10-28): ramping over OSC was buggy. volume_smooth then sets immediately like /set/volume.
 # Clients should coalesce targets (~20–30 Hz); do not spam every encoder tick.
-SMOOTHING_ENABLED = True
+SMOOTHING_ENABLED = False
 SMOOTH_STEPS_PER_TICK = 4
 SMOOTH_STEP_FACTOR = 0.4
 SMOOTH_EPSILON = 1e-6
