@@ -22,6 +22,11 @@ class MidiMapHandler(AbletonOSCHandler):
             self.manager.midi_button_mappings = {}
         if not hasattr(self.manager, "midi_mappings") or self.manager.midi_mappings is None:
             self.manager.midi_mappings = {}
+        if not hasattr(self.manager, "midi_mappings_14bit") or self.manager.midi_mappings_14bit is None:
+            self.manager.midi_mappings_14bit = set()
+        # Tracks whose device list is watched; the bridge's mappings are by index, so any change drops them.
+        self.watched_tracks = {}
+        self.song.add_tracks_listener(self._on_structure_changed)
 
         def map_device_cc(params: Tuple[Any] = ()):
             track_index = int(params[0])
@@ -91,6 +96,7 @@ class MidiMapHandler(AbletonOSCHandler):
 
         def clear_maps(params: Tuple[Any] = ()):
             self.manager.midi_mappings.clear()
+            self.manager.midi_mappings_14bit.clear()
             self.manager.midi_button_mappings.clear()
             self.manager.request_rebuild_midi_map()
             return (0,)
@@ -116,12 +122,95 @@ class MidiMapHandler(AbletonOSCHandler):
         self.osc_server.add_handler("/live/midimap/map_mixer_mutes", map_mixer_mutes)
         self.osc_server.add_handler("/live/midimap/map_mixer_solos", map_mixer_solos)
         self.osc_server.add_handler("/live/midimap/map_mixer_arms", map_mixer_arms)
+        def map_target(params: Tuple[Any] = ()):
+            """
+            SetControl bridge: map one 14-bit CC slot (CC n + n+32) to a parameter.
+            params: channel, cc (0..31), kind ("volume" | "panning" | "param"), track[, device, parameter]
+            Answers channel, cc, min, max, quantized so the bridge can scale values.
+            """
+            channel, cc, kind = int(params[0]), int(params[1]), str(params[2])
+            target = params[3:]
+            parameter = self._resolve(kind, target)
+            self._store_cc_mapping(channel, cc, parameter)
+            self.manager.midi_mappings_14bit.add((channel, cc))
+            self._watch_track(int(target[0]))
+            self.manager.request_rebuild_midi_map()
+            return (channel, cc, float(parameter.min), float(parameter.max), int(bool(parameter.is_quantized)))
+
+        def unmap_target(params: Tuple[Any] = ()):
+            key = (int(params[0]), int(params[1]))
+            self.manager.midi_mappings.pop(key, None)
+            self.manager.midi_mappings_14bit.discard(key)
+            self.manager.request_rebuild_midi_map()
+            return key
+
+        self.osc_server.add_handler("/live/midimap/map", map_target)
+        self.osc_server.add_handler("/live/midimap/unmap", unmap_target)
         self.osc_server.add_handler("/live/midimap/clear", clear_maps)
         self.osc_server.add_handler("/live/midimap/clear_channel", clear_channel)
         self.logger.info(
             "MidiMap handlers ready "
             "(volumes/panning=Live.MidiMap, mute/solo/arm=MIDI buttons)"
         )
+
+    def clear_api(self):
+        super().clear_api()
+        try:
+            self.song.remove_tracks_listener(self._on_structure_changed)
+        except Exception:
+            pass
+        for track, callback in list(self.watched_tracks.values()):
+            try:
+                track.remove_devices_listener(callback)
+            except Exception:
+                pass
+        self.watched_tracks = {}
+
+    def _track(self, track_index: int):
+        return self.song.master_track if track_index == -1 else self.song.tracks[track_index]
+
+    def _resolve(self, kind: str, target: Tuple[Any]):
+        track = self._track(int(target[0]))
+        if kind == "volume":
+            return track.mixer_device.volume
+        if kind == "panning":
+            return track.mixer_device.panning
+        if kind == "param":
+            device_index = target[1]
+            if isinstance(device_index, str):
+                # Path into racks, as in device.py: "device.chain.device[...]"
+                path = [int(p) for p in device_index.split(".")]
+                device = track.devices[path[0]]
+                for chain_index, dev_index in zip(path[1::2], path[2::2]):
+                    device = device.chains[chain_index].devices[dev_index]
+            else:
+                device = track.devices[int(device_index)]
+            return device.parameters[int(target[2])]
+        raise ValueError("Unknown midimap kind: %s" % kind)
+
+    def _watch_track(self, track_index: int) -> None:
+        track = self._track(track_index)
+        if track_index in self.watched_tracks:
+            return
+        callback = self._on_structure_changed
+        track.add_devices_listener(callback)
+        self.watched_tracks[track_index] = (track, callback)
+
+    def _on_structure_changed(self):
+        """Tracks or devices moved: the bridge's index-based slots may point at the wrong parameter now."""
+        if not self.manager.midi_mappings_14bit:
+            return
+        for key in list(self.manager.midi_mappings_14bit):
+            self.manager.midi_mappings.pop(key, None)
+        self.manager.midi_mappings_14bit.clear()
+        for track, callback in list(self.watched_tracks.values()):
+            try:
+                track.remove_devices_listener(callback)
+            except Exception:
+                pass
+        self.watched_tracks = {}
+        self.manager.request_rebuild_midi_map()
+        self.osc_server.send("/live/midimap/cleared", (1,))
 
     def _map_mixer_params(
         self, channel: int, first_cc: int, track_start: int, count: int, prop: str

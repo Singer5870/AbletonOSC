@@ -25,6 +25,8 @@ class Manager(ControlSurface):
 
         self.handlers = []
         self.midi_mappings = {}
+        # SetControl bridge slots mapped as 14-bit (CC n + n+32)
+        self.midi_mappings_14bit = set()
         # Discrete mute/solo/arm — applied in receive_midi (not Live.MidiMap)
         self.midi_button_mappings = {}
 
@@ -175,6 +177,7 @@ class Manager(ControlSurface):
             if not hasattr(self, "midi_button_mappings") or self.midi_button_mappings is None:
                 self.midi_button_mappings = {}
             self.midi_mappings.clear()
+            self.midi_mappings_14bit = set()
             self.midi_button_mappings.clear()
             self.init_api()
             self.request_rebuild_midi_map()
@@ -260,7 +263,9 @@ class Manager(ControlSurface):
                     parameter,
                     channel,
                     cc,
-                    Live.MidiMap.MapMode.absolute,
+                    Live.MidiMap.MapMode.absolute_14_bit
+                    if (channel, cc) in self.midi_mappings_14bit
+                    else Live.MidiMap.MapMode.absolute,
                     True,  # avoid_takeover — SetControl is authoritative while moving
                 )
                 logger.debug(
@@ -270,3 +275,9 @@ class Manager(ControlSurface):
                 logger.warning(
                     "Failed to map CC %d ch %d: %s" % (cc, channel, traceback.format_exc())
                 )
+
+        # SetControl bridge: slots mapped before this point are live in Live's MIDI engine now.
+        try:
+            self.osc_server.send("/live/midimap/built", (len(self.midi_mappings),))
+        except Exception:
+            logger.warning("Failed to report MIDI map build: %s" % traceback.format_exc())
