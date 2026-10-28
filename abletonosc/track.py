@@ -89,6 +89,13 @@ class TrackHandler(AbletonOSCHandler):
             self.osc_server.add_handler("/live/track/stop_listen/%s" % prop,
                                         create_track_callback(self._stop_mixer_listen, prop, include_track_id=True))
 
+        # SetControl: Live's text for any volume value (e.g. "-6.0 dB"), without changing the track.
+        def track_get_volume_string_for(params):
+            track = self.song.master_track if int(params[0]) == -1 else self.song.tracks[int(params[0])]
+            values = [float(v) for v in params[1:]]
+            return (int(params[0]), *[track.mixer_device.volume.str_for_value(v) for v in values])
+        self.osc_server.add_handler("/live/track/get/volume_string_for", track_get_volume_string_for)
+
         # Legacy OSC smooth paths — prefer MidiMap for continuous params.
         # Kept registered so old clients don't break, but SetControl does not use them.
         self.osc_server.add_handler(
