@@ -130,6 +130,18 @@ class TrackHandler(AbletonOSCHandler):
         def track_get_clip_names(track, _):
             return tuple(clip_slot.clip.name if clip_slot.clip else None for clip_slot in track.clip_slots)
 
+        def track_insert_device(track, params):
+            # SetControl adds its "Gainstage" Utility this way (Live 12.3+: Track.insert_device). params: name, index, optional new name.
+            index = int(params[1]) if len(params) > 1 else 0
+            track.insert_device(str(params[0]), index)
+            device = track.devices[index]
+            if len(params) > 2:
+                try:
+                    device.name = str(params[2])
+                except Exception:
+                    pass
+            return (device.name, device.class_name)
+
         def track_get_clip_file_paths(track, _):
             # Audio clips only; MIDI clips and empty slots give None (SetControl overlay matches favourites by file).
             def file_path(clip_slot):
@@ -158,6 +170,7 @@ class TrackHandler(AbletonOSCHandler):
         Returns a list of clip properties, or Nil if clip is empty
         """
         self.osc_server.add_handler("/live/track/get/clips/name", create_track_callback(track_get_clip_names))
+        self.osc_server.add_handler("/live/track/insert_device", create_track_callback(track_insert_device))
         self.osc_server.add_handler("/live/track/get/clips/file_path", create_track_callback(track_get_clip_file_paths))
         self.osc_server.add_handler("/live/track/get/clips/length", create_track_callback(track_get_clip_lengths))
         self.osc_server.add_handler("/live/track/get/clips/color", create_track_callback(track_get_clip_colors))
