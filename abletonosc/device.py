@@ -152,7 +152,11 @@ class DeviceHandler(AbletonOSCHandler):
             if listener_key in self.listener_functions:
                 self.logger.info("Removing listener for %s %s, property %s" % (self.class_identifier, str(params), 'value'))
                 listener_function = self.listener_functions[listener_key]
-                device.parameters[params[2]].remove_value_listener(listener_function)
+                try:
+                    device.parameters[params[2]].remove_value_listener(listener_function)
+                except Exception as e:
+                    # The device was removed and added again: the old listener sits on a parameter that is gone (benign).
+                    self.logger.info("Exception whilst removing listener (likely benign): %s" % e)
                 del self.listener_functions[listener_key]
             else:
                 self.logger.warning("No listener function found for device parameter %s" % str(params))
