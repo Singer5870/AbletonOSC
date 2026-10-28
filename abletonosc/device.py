@@ -150,7 +150,7 @@ class DeviceHandler(AbletonOSCHandler):
                 device.parameters[params[2]].remove_value_listener(listener_function)
                 del self.listener_functions[listener_key]
             else:
-                self.logger.warning("No listener function found for property: %s (%s)" % (prop, str(params)))
+                self.logger.warning("No listener function found for device parameter %s" % str(params))
 
         def device_set_parameter_value(device, params: Tuple[Any] = ()):
             param_index, param_value = params[:2]
