@@ -9,8 +9,18 @@ class DeviceHandler(AbletonOSCHandler):
     def init_api(self):
         def create_device_callback(func, *args, include_ids: bool = False):
             def device_callback(params: Tuple[Any]):
-                track_index, device_index = int(params[0]), int(params[1])
-                device = self.song.tracks[track_index].devices[device_index]
+                track_index = int(params[0])
+                device_index = params[1]
+                track = self.song.master_track if track_index == -1 else self.song.tracks[track_index]
+                if isinstance(device_index, str):
+                    # Path into racks: "device.chain.device[.chain.device...]", e.g. "0.1.2"
+                    path = [int(p) for p in device_index.split(".")]
+                    device = track.devices[path[0]]
+                    for chain_index, dev_index in zip(path[1::2], path[2::2]):
+                        device = device.chains[chain_index].devices[dev_index]
+                else:
+                    device_index = int(device_index)
+                    device = track.devices[device_index]
                 if (include_ids):
                     rv = func(device, *args, params[0:])
                 else:
@@ -20,6 +30,19 @@ class DeviceHandler(AbletonOSCHandler):
                     return (track_index, device_index, *rv)
 
             return device_callback
+
+        def device_get_chains(device, _):
+            return tuple(chain.name for chain in device.chains)
+
+        def device_get_chain_devices(device, params):
+            chain = device.chains[int(params[0])]
+            out = []
+            for d in chain.devices:
+                out += [d.name, d.class_name]
+            return tuple(out)
+
+        self.osc_server.add_handler("/live/device/get/chains", create_device_callback(device_get_chains))
+        self.osc_server.add_handler("/live/device/get/chain_devices", create_device_callback(device_get_chain_devices))
 
         methods = [
         ]

@@ -18,7 +18,7 @@ class TrackHandler(AbletonOSCHandler):
                     track_indices = [int(params[0])]
 
                 for track_index in track_indices:
-                    track = self.song.tracks[track_index]
+                    track = self.song.master_track if track_index == -1 else self.song.tracks[track_index]
                     if include_track_id:
                         rv = func(track, *args, tuple([track_index] + params[1:]))
                     else:
